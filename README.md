@@ -3,6 +3,8 @@
 고객 문장을 받아 환불 가능 여부를 판정하는 상담 웹앱입니다.
 앱의 모든 흐름이 **엣지 배열 하나**에 선언되어 있고, 화면은 그 배열을 읽어 그립니다.
 
+**▶ [바로 실행해 보기](https://ifree015.github.io/refund-consult-graph/)** — 설치 없이 브라우저에서 바로 씁니다.
+
 앱은 파일 하나입니다. 빌드 도구도 의존성도 없습니다.
 
 ```
@@ -15,7 +17,13 @@ docs/        이 문서에 쓰는 화면 캡처
 
 ## 실행 방법
 
-### 앱 열기
+### 브라우저에서 바로
+
+https://ifree015.github.io/refund-consult-graph/
+
+GitHub Pages로 `main` 브랜치의 `index.html`을 그대로 서빙합니다. push하면 몇 분 안에 반영됩니다.
+
+### 내려받아서 열기
 
 ```bash
 open index.html          # macOS

@@ -446,7 +446,11 @@ function 문장에서추출(문장) {
   .edge      { fill: none; stroke: #dadad4; stroke-width: 1.6; marker-end: url(#a-off); }
   .edge.on   { stroke: var(--green); stroke-width: 2.4; marker-end: url(#a-on); }
   .edge.wait { stroke: var(--amber); stroke-width: 2.4; marker-end: url(#a-wait); stroke-dasharray: 4 3; }
-  .elabel      { font-size: 9.5px; fill: #a8a8a2; text-anchor: middle; }
+  /* 선 위에 겹쳐도 읽히도록 글자에 흰 테두리를 두른다.
+     엣지를 추가해 자동 배치된 라벨이 다른 선과 만나도 안전하다. */
+  .elabel      { font-size: 9.5px; fill: #a8a8a2; text-anchor: middle;
+                 paint-order: stroke; stroke: #fff; stroke-width: 3.5px;
+                 stroke-linejoin: round; }
   .elabel.on   { fill: var(--green); font-weight: 600; }
   .elabel.wait { fill: var(--amber); font-weight: 600; }
 
@@ -585,19 +589,98 @@ var 좌표 = {
   '사람승인': { x: 310, y: 210 }
 };
 
-/* 엣지 그림. EDGES와 같은 순서, 없으면 직선으로 그린다. */
-var 선 = [
-  { d: 'M 46,54 C 34,14 106,14 94,54',            label: [70, 10] },
-  { d: 'M 70,90 C 70,172 165,210 261,210',        label: [100, 186] },
-  { d: 'M 118,72 L 176,72',                       label: [147, 63] },
-  { d: 'M 225,90 C 225,150 258,172 289,190',      label: [268, 138] },
-  { d: 'M 273,72 L 371,72',                       label: [322, 63] },
-  { d: 'M 286,228 C 274,268 346,268 334,228',     label: [310, 284] },
-  { d: 'M 357,198 C 412,182 420,140 420,92',      label: [452, 148] },
-  { d: 'M 357,216 C 470,228 562,196 570,92',      label: [472, 240] },
-  { d: 'M 467,72 L 521,72',                       label: [494, 63] }
-];
-var 짧은이름 = ['미확인', '기간 초과', '기간 이내', '50만 초과', '50만 이하', '판단 대기', '승인', '반려', '접수'];
+/* ══════════════════════════════════════════════════════════════════
+   엣지 그림을 EDGES와 좌표에서 계산한다.
+
+   손으로 적어 둔 path 배열이 없다. EDGES에 줄을 추가하면 선과 라벨이
+   따라 나오므로, 노드를 늘릴 때 좌표만 넣으면 된다.
+   ══════════════════════════════════════════════════════════════════ */
+var 박스 = { 폭: 94, 높이: 36 };
+var 화면 = { 폭: 640, 높이: 300 };
+
+function 사이(값, 최소, 최대) { return Math.max(최소, Math.min(최대, 값)); }
+
+/** 두 노드를 잇는다면 서로 어느 면으로 드나들지 */
+function 면정하기(a, b) {
+  var dx = b.x - a.x, dy = b.y - a.y;
+  if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? ['오른', '왼'] : ['왼', '오른'];
+  return dy >= 0 ? ['아래', '위'] : ['위', '아래'];
+}
+
+/** 노드 테두리에서 선이 붙는 점. 상대 노드 쪽으로 조금 치우쳐 서로 겹치지 않게 한다. */
+function 붙는점(이쪽, 면, 저쪽) {
+  var p = 좌표[이쪽], q = 좌표[저쪽];
+  if (면 === '위' || 면 === '아래') {
+    return { x: p.x + 사이((q.x - p.x) * 0.25, -33, 33),
+             y: p.y + (면 === '위' ? -박스.높이 / 2 : 박스.높이 / 2) };
+  }
+  return { x: p.x + (면 === '왼' ? -박스.폭 / 2 : 박스.폭 / 2),
+           y: p.y + 사이((q.y - p.y) * 0.06, -9, 9) };
+}
+
+/** 3차 베지어 위의 한 점 */
+function 곡선점(P, t) {
+  var u = 1 - t;
+  return {
+    x: u*u*u*P[0].x + 3*u*u*t*P[1].x + 3*u*t*t*P[2].x + t*t*t*P[3].x,
+    y: u*u*u*P[0].y + 3*u*u*t*P[1].y + 3*u*t*t*P[2].y + t*t*t*P[3].y
+  };
+}
+
+/** 엣지 하나의 곡선과 라벨 위치 */
+function 엣지그림(from, to) {
+  var P;
+
+  if (from === to) {                       /* 제자리 — 노드 위나 아래로 고리를 그린다 */
+    var p = 좌표[from], 위쪽 = p.y < 화면.높이 / 2;
+    var y = p.y + (위쪽 ? -박스.높이 / 2 : 박스.높이 / 2);
+    var h = 위쪽 ? -38 : 38;
+    P = [{ x: p.x - 24, y: y }, { x: p.x - 34, y: y + h },
+         { x: p.x + 34, y: y + h }, { x: p.x + 24, y: y }];
+  } else {
+    var 면 = 면정하기(좌표[from], 좌표[to]);
+    var a = 붙는점(from, 면[0], to);
+    var b = 붙는점(to, 면[1], from);
+    if (면[0] === '왼' || 면[0] === '오른') {       /* 가로로 나가면 가로로 휜다 */
+      var kx = (b.x - a.x) * 0.5;
+      P = [a, { x: a.x + kx, y: a.y }, { x: b.x - kx, y: b.y }, b];
+    } else {                                        /* 세로로 나가면 세로로 휜다 */
+      var ky = (b.y - a.y) * 0.5;
+      P = [a, { x: a.x, y: a.y + ky }, { x: b.x, y: b.y - ky }, b];
+    }
+  }
+
+  /* 라벨은 곡선 한가운데에서 화면 바깥쪽으로 밀어 선 위에 겹치지 않게 한다 */
+  var 가운데 = 곡선점(P, 0.5);
+  var 앞 = 곡선점(P, 0.46), 뒤 = 곡선점(P, 0.54);
+  var dx = 뒤.x - 앞.x, dy = 뒤.y - 앞.y;
+  var 길이 = Math.sqrt(dx*dx + dy*dy) || 1;
+  var 수직 = { x: -dy / 길이, y: dx / 길이 };
+  var 바깥 = { x: 가운데.x - 화면.폭 / 2, y: 가운데.y - 화면.높이 / 2 };
+  if (수직.x * 바깥.x + 수직.y * 바깥.y < 0) { 수직.x *= -1; 수직.y *= -1; }
+
+  return {
+    d: 'M ' + P[0].x.toFixed(1) + ',' + P[0].y.toFixed(1) +
+       ' C ' + P[1].x.toFixed(1) + ',' + P[1].y.toFixed(1) +
+       ' '   + P[2].x.toFixed(1) + ',' + P[2].y.toFixed(1) +
+       ' '   + P[3].x.toFixed(1) + ',' + P[3].y.toFixed(1),
+    가운데: 가운데,
+    수직: 수직
+  };
+}
+
+/** 조건 이름이 길면 가운데 빈칸에서 두 줄로 접는다 */
+function 라벨줄(이름) {
+  if (이름.length <= 9) return [이름];
+  var 빈칸 = [];
+  for (var i = 0; i < 이름.length; i++) if (이름.charAt(i) === ' ') 빈칸.push(i);
+  if (!빈칸.length) return [이름];
+  var 가운데 = 이름.length / 2, 최선 = 빈칸[0];
+  빈칸.forEach(function (p) {
+    if (Math.abs(p - 가운데) < Math.abs(최선 - 가운데)) 최선 = p;
+  });
+  return [이름.slice(0, 최선), 이름.slice(최선 + 1)];
+}
 
 function 그래프그리기() {
   var 지남 = {};
@@ -616,11 +699,23 @@ function 그래프그리기() {
 
   var e = '';
   EDGES.forEach(function (엣지, i) {
-    var 모양 = 선[i] || { d: '', label: [0, 0] };
+    var 모양 = 엣지그림(엣지[0], 엣지[3]);
     var cls = 지남[i] ? ' on' : (i === 대기엣지 ? ' wait' : '');
+    /* 제자리 엣지는 노드 위아래로 가로 공간이 넉넉하니 접지 않는다 */
+    var 줄 = (엣지[0] === 엣지[3]) ? [엣지[1]] : 라벨줄(엣지[1]);
+
+    /* 곡선에서 밀어낼 거리. 가로로 밀 때는 글자 너비를, 세로로 밀 때는 줄 수를 본다. */
+    var 거리 = 9 + Math.abs(모양.수직.x) * Math.min(엣지[1].length * 4.6, 30)
+                 + Math.abs(모양.수직.y) * 줄.length * 9;
+    var lx = 사이(모양.가운데.x + 모양.수직.x * 거리, 24, 화면.폭 - 24);
+    var ly = 사이(모양.가운데.y + 모양.수직.y * 거리 - (줄.length - 1) * 5.5, 11, 화면.높이 - 4);
+
     e += '<path class="edge' + cls + '" d="' + 모양.d + '"></path>';
-    e += '<text class="elabel' + cls + '" x="' + 모양.label[0] + '" y="' + 모양.label[1] + '">' +
-         짧은이름[i] + '</text>';
+    e += '<text class="elabel' + cls + '" x="' + lx.toFixed(1) + '" y="' + ly.toFixed(1) + '">' +
+         줄.map(function (s, k) {
+           return '<tspan x="' + lx.toFixed(1) + '" dy="' + (k ? 11 : 0) + '">' + s + '</tspan>';
+         }).join('') +
+         '</text>';
   });
   document.getElementById('gEdges').innerHTML = e;
 
